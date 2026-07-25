@@ -58,7 +58,12 @@ const formSchema = z.object({
   origin: z.enum(['MANUAL', 'VOZ']),
 });
 
-type FormData = z.infer<typeof formSchema>;
+/**
+ * The schema takes what the inputs hold (text) and gives back numbers, so the
+ * form fields and the submit handler are typed from opposite ends of it.
+ */
+type FormInput = z.input<typeof formSchema>;
+type FormData = z.output<typeof formSchema>;
 
 function nowIso(): string {
   const d = new Date();
@@ -117,7 +122,7 @@ export function WaterQualityFormScreen() {
     control,
     handleSubmit,
     formState: { errors },
-  } = useForm<FormData>({
+  } = useForm<FormInput, unknown, FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       measuredAt: nowIso(),
