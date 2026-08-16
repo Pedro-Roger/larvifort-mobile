@@ -1,14 +1,10 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { useSync } from '../hooks/useSync';
+import { formatTime } from '../utils/date';
 
 export function SyncStatusBar() {
   const { isSyncing, isOnline, pendingCount, lastSyncAt, syncNow } = useSync();
-
-  const formatTime = (date: Date | null) => {
-    if (!date) return 'Nunca';
-    return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  };
 
   return (
     <View style={styles.container}>

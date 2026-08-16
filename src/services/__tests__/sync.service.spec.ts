@@ -55,6 +55,21 @@ describe('pushOutbox', () => {
     expect(api.post).toHaveBeenCalledWith('/v1/water-quality', expect.objectContaining({ cycleId: 'c1' }));
   });
 
+  it('should POST mortality to /v1/mortality, matching the mortality.service outbox entity', async () => {
+    mockDb.getAllAsync.mockResolvedValue([
+      {
+        client_id: 'uuid-3',
+        entity: 'mortality',
+        payload: JSON.stringify({ cycleId: 'c1', quantity: 12 }),
+        attempts: 0,
+      },
+    ]);
+
+    await pushOutbox();
+
+    expect(api.post).toHaveBeenCalledWith('/v1/mortality', expect.objectContaining({ cycleId: 'c1' }));
+  });
+
   it('should mark item as synced after successful POST', async () => {
     mockDb.getAllAsync.mockResolvedValue([
       { client_id: 'uuid-1', entity: 'biometrics', payload: '{}', attempts: 0 },

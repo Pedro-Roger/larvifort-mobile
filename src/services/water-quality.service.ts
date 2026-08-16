@@ -1,32 +1,58 @@
-import { getDb } from '../database/db';
+import { outboxRepository } from '../database/repositories/outbox.repository';
+import { generateUUID } from '../utils/uuid';
 import type { WaterQualityRecord } from '../types';
 
-function generateUUID(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
-  bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant
-  const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+/**
+ * Body actually accepted by CreateWaterQualityDto (POST /v1/water-quality).
+ * The local form/type uses different names for the same values (oxygenMgL,
+ * salinityPpt, MANUAL/VOZ) — this is where the two contracts get reconciled.
+ * pondId and responsibleName are dropped: pondId isn't in the DTO (the API
+ * derives it from cycleId) and responsibleName isn't whitelisted, so sending
+ * either would make the whole request fail with forbidNonWhitelisted.
+ */
+export interface WaterQualityApiPayload {
+  cycleId: string;
+  responsibleId: string;
+  doMgL?: number;
+  ph?: number;
+  salinity?: number;
+  temperatureC?: number;
+  ammoniaMgL?: number;
+  measuredAt: string;
+  source: 'manual' | 'voz';
+  clientId: string;
+}
+
+export function buildWaterQualityApiPayload(
+  data: Omit<WaterQualityRecord, 'clientId'>,
+  clientId: string,
+): WaterQualityApiPayload {
+  return {
+    cycleId: data.cycleId,
+    responsibleId: data.responsibleId,
+    doMgL: data.oxygenMgL,
+    ph: data.ph,
+    salinity: data.salinityPpt,
+    temperatureC: data.temperatureC,
+    ammoniaMgL: data.ammoniaMgL,
+    measuredAt: data.measuredAt,
+    source: data.origin === 'VOZ' ? 'voz' : 'manual',
+    clientId,
+  };
 }
 
 export async function saveOffline(
   data: Omit<WaterQualityRecord, 'clientId'>,
 ): Promise<string> {
-  const db = await getDb();
   const clientId = generateUUID();
-  const payload = { ...data, clientId };
+  const payload = buildWaterQualityApiPayload(data, clientId);
 
-  await db.runAsync(
-    `INSERT INTO outbox (client_id, entity, payload, status, measured_at, created_at)
-     VALUES (?, ?, ?, 'pending', ?, datetime('now'))`,
-    [
-      clientId,
-      'water-quality',
-      JSON.stringify(payload),
-      data.measuredAt,
-    ],
-  );
+  await outboxRepository.enqueue({
+    clientId,
+    entity: 'water-quality',
+    payload: { ...payload },
+    measuredAt: data.measuredAt,
+  });
 
   return clientId;
 }

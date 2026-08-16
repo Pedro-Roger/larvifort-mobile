@@ -1,19 +1,11 @@
-import { getDb } from '../database/db';
+import { outboxRepository } from '../database/repositories/outbox.repository';
+import { generateUUID } from '../utils/uuid';
 
 /**
  * Feeding is what the field records most, and it is the number that moves
  * stock, so it has to survive a phone with no signal: every entry goes to the
  * local outbox first and is pushed when the connection comes back.
  */
-
-function generateUUID(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
-  bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant
-  const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
 
 export interface FeedingOfflinePayload {
   cycleId: string;
@@ -35,7 +27,6 @@ export async function saveOfflineFeeding(payload: FeedingOfflinePayload): Promis
     throw new Error('Quantidade de ração deve ser maior que zero');
   }
 
-  const db = await getDb();
   const clientId = generateUUID();
 
   // clientUuid makes the push idempotent: if the sync retries after a timeout,
@@ -51,11 +42,12 @@ export async function saveOfflineFeeding(payload: FeedingOfflinePayload): Promis
     clientUuid: clientId,
   };
 
-  await db.runAsync(
-    `INSERT OR REPLACE INTO outbox (client_id, entity, payload, status, attempts, measured_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
-    [clientId, FEEDING_ENTITY, JSON.stringify(body), 'pending', 0, payload.fedAt],
-  );
+  await outboxRepository.enqueue({
+    clientId,
+    entity: FEEDING_ENTITY,
+    payload: body,
+    measuredAt: payload.fedAt,
+  });
 
   return clientId;
 }
@@ -66,20 +58,11 @@ export async function saveOfflineFeeding(payload: FeedingOfflinePayload): Promis
  * they just typed.
  */
 export async function getPendingFeedKgForPond(pondId: string): Promise<number> {
-  const db = await getDb();
+  const items = await outboxRepository.findPendingByEntity(FEEDING_ENTITY);
 
-  const rows = await db.getAllAsync<{ payload: string }>(
-    `SELECT payload FROM outbox WHERE entity = ? AND status = 'pending'`,
-    [FEEDING_ENTITY],
-  );
-
-  return rows.reduce((total, row) => {
-    try {
-      const parsed = JSON.parse(row.payload) as { pondId?: string; feedKg?: number };
-      if (parsed.pondId !== pondId) return total;
-      return total + (Number(parsed.feedKg) || 0);
-    } catch {
-      return total;
-    }
+  return items.reduce((total, item) => {
+    const parsed = item.payload as { pondId?: string; feedKg?: number };
+    if (parsed.pondId !== pondId) return total;
+    return total + (Number(parsed.feedKg) || 0);
   }, 0);
 }

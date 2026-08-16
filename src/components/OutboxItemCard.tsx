@@ -2,10 +2,13 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import type { OutboxItem } from '../types';
 import { SyncStatus } from '../types';
+import { formatDateTime } from '../utils/date';
 
 interface OutboxItemCardProps {
   item: OutboxItem;
   onRetry?: (clientId: string) => void;
+  /** id -> nome, do cache local de usuários (ver `useUsersCache`). */
+  usersById?: Record<string, string>;
 }
 
 const STATUS_CONFIG: Record<SyncStatus, { icon: string; color: string; label: string }> = {
@@ -14,22 +17,27 @@ const STATUS_CONFIG: Record<SyncStatus, { icon: string; color: string; label: st
   [SyncStatus.ERROR]: { icon: '✗', color: '#ef4444', label: 'Erro' },
 };
 
-function formatDate(iso: string | undefined | null): string {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
+/**
+ * RF-12: cada lançamento precisa mostrar quem coletou o dado. O payload é
+ * genérico (`Record<string, unknown>`) e só carrega `responsibleId` — os
+ * services de lançamento (feeding, biometric, mortality) deliberadamente não
+ * mandam `responsibleName` pro outbox porque isso viraria o corpo do POST
+ * (a API rejeita campo que não está no DTO). O nome vem do cache local de
+ * usuários, resolvido pelo id; se o usuário ainda não foi sincronizado,
+ * cai para o id cru em vez de esconder o campo.
+ */
+function getResponsibleLabel(
+  payload: Record<string, unknown>,
+  usersById: Record<string, string>,
+): string | undefined {
+  const id = payload.responsibleId;
+  if (typeof id !== 'string' || id.trim().length === 0) return undefined;
+  return usersById[id] ?? id;
 }
 
-export function OutboxItemCard({ item, onRetry }: OutboxItemCardProps) {
+export function OutboxItemCard({ item, onRetry, usersById = {} }: OutboxItemCardProps) {
   const config = STATUS_CONFIG[item.status] ?? STATUS_CONFIG[SyncStatus.PENDING];
+  const responsible = getResponsibleLabel(item.payload, usersById);
 
   return (
     <View style={styles.card}>
@@ -42,11 +50,14 @@ export function OutboxItemCard({ item, onRetry }: OutboxItemCardProps) {
       </View>
 
       <View style={styles.details}>
+        {responsible && (
+          <Text style={styles.responsible}>Responsável: {responsible}</Text>
+        )}
         <Text style={styles.detailText}>
-          Coleta: {formatDate(item.measuredAt)}
+          Coleta: {formatDateTime(item.measuredAt)}
         </Text>
         <Text style={styles.detailText}>
-          Criado: {formatDate(item.createdAt)}
+          Criado: {formatDateTime(item.createdAt)}
         </Text>
         {item.attempts > 0 && (
           <Text style={styles.attempts}>Tentativas: {item.attempts}</Text>
@@ -105,6 +116,11 @@ const styles = StyleSheet.create({
   detailText: {
     color: '#94a3b8',
     fontSize: 13,
+  },
+  responsible: {
+    color: '#e2e8f0',
+    fontSize: 13,
+    fontWeight: '600',
   },
   attempts: {
     color: '#f59e0b',

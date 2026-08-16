@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import NetInfo from '@react-native-community/netinfo';
 import { syncAll, retryErrors } from '../services/sync.service';
-import { getDb } from '../database/db';
+import { outboxRepository } from '../database/repositories/outbox.repository';
 
 export interface UseSyncReturn {
   isSyncing: boolean;
@@ -20,11 +20,8 @@ export function useSync(): UseSyncReturn {
 
   const refreshPendingCount = useCallback(async () => {
     try {
-      const db = await getDb();
-      const result = await db.getFirstAsync<{ count: number }>(
-        `SELECT COUNT(*) as count FROM outbox WHERE status = 'pending'`,
-      );
-      setPendingCount(result?.count ?? 0);
+      const count = await outboxRepository.countPending();
+      setPendingCount(count);
     } catch {
       // ignore
     }

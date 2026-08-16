@@ -6,10 +6,11 @@ import { ActivityIndicator, View } from 'react-native';
 import { useAuth } from '../hooks/useAuth';
 import { LoginScreen } from '../screens/LoginScreen';
 import { HomeScreen } from '../screens/HomeScreen';
-import { WaterQualityFormScreen } from '../screens/WaterQualityFormScreen';
+import { WaterQualityFormScreen } from '../screens/water-quality/WaterQualityFormScreen';
 import { OutboxScreen } from '../screens/OutboxScreen';
 import { BiometricFormScreen } from '../screens/biometrics/BiometricFormScreen';
 import { FeedingFormScreen } from '../screens/feeding/FeedingFormScreen';
+import { MortalityFormScreen } from '../screens/mortality/MortalityFormScreen';
 
 export type AuthStackParamList = {
   Login: undefined;
@@ -20,6 +21,7 @@ export type AppStackParamList = {
   WaterQualityForm: { pondId?: string } | undefined;
   BiometricForm: { cycleId?: string } | undefined;
   FeedingForm: { pondId?: string } | undefined;
+  MortalityForm: { pondId?: string } | undefined;
   Outbox: undefined;
 };
 
@@ -59,6 +61,11 @@ function AppNavigatorInner() {
         name="FeedingForm"
         component={FeedingFormScreen}
         options={{ title: 'Registrar Trato' }}
+      />
+      <AppStack.Screen
+        name="MortalityForm"
+        component={MortalityFormScreen}
+        options={{ title: 'Registrar Mortalidade' }}
       />
       <AppStack.Screen
         name="Outbox"

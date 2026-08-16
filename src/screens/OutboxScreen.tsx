@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,9 +10,8 @@ import {
 import { OutboxItemCard } from '../components/OutboxItemCard';
 import { useOutbox } from '../hooks/useOutbox';
 import { useSync } from '../hooks/useSync';
+import { useUsersCache } from '../hooks/useUsersCache';
 import { SyncStatus } from '../types';
-import { retryErrors } from '../services/sync.service';
-import { getDb } from '../database/db';
 
 type FilterTab = 'all' | SyncStatus;
 
@@ -25,10 +24,15 @@ const TABS: { key: FilterTab; label: string }[] = [
 
 export function OutboxScreen() {
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
-  const { items, isLoading, counts, reload } = useOutbox(
+  const { items, isLoading, counts, reload, retryOne } = useOutbox(
     activeTab === 'all' ? undefined : activeTab,
   );
   const { retryAllErrors, isSyncing } = useSync();
+  const { users } = useUsersCache();
+  const usersById = useMemo(
+    () => Object.fromEntries(users.map((u) => [u.id, u.name])),
+    [users],
+  );
 
   const handleRetryAll = useCallback(async () => {
     if (counts.error === 0) return;
@@ -39,18 +43,13 @@ export function OutboxScreen() {
   const handleRetrySingle = useCallback(
     async (clientId: string) => {
       try {
-        const db = await getDb();
-        await db.runAsync(
-          `UPDATE outbox SET status = 'pending', attempts = 0, last_error = NULL WHERE client_id = ?`,
-          [clientId],
-        );
-        await reload();
+        await retryOne(clientId);
         Alert.alert('OK', 'Item marcado para reenvio');
       } catch {
         Alert.alert('Erro', 'Não foi possível reenviar o item');
       }
     },
-    [reload],
+    [retryOne],
   );
 
   return (
@@ -94,7 +93,7 @@ export function OutboxScreen() {
         data={items}
         keyExtractor={(item) => item.clientId}
         renderItem={({ item }) => (
-          <OutboxItemCard item={item} onRetry={handleRetrySingle} />
+          <OutboxItemCard item={item} onRetry={handleRetrySingle} usersById={usersById} />
         )}
         refreshing={isLoading}
         onRefresh={reload}

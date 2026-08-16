@@ -16,15 +16,16 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { PondSelector } from '../components/PondSelector';
-import { CycleSelector } from '../components/CycleSelector';
-import { ResponsibleSelector } from '../components/ResponsibleSelector';
-import { useAuth } from '../hooks/useAuth';
-import { useSync } from '../hooks/useSync';
-import { saveOffline } from '../services/water-quality.service';
-import { api } from '../services/api';
-import type { AppStackParamList } from '../navigation/AppNavigator';
-import type { Pond, Cycle, User } from '../types';
+import { PondSelector } from '../../components/PondSelector';
+import { CycleSelector } from '../../components/CycleSelector';
+import { ResponsibleSelector } from '../../components/ResponsibleSelector';
+import { useAuth } from '../../hooks/useAuth';
+import { useSync } from '../../hooks/useSync';
+import { buildWaterQualityApiPayload, saveOffline } from '../../services/water-quality.service';
+import { generateUUID } from '../../utils/uuid';
+import { api } from '../../services/api';
+import type { AppStackParamList } from '../../navigation/AppNavigator';
+import type { Pond, Cycle, User } from '../../types';
 
 type Nav = NativeStackNavigationProp<AppStackParamList, 'WaterQualityForm'>;
 
@@ -164,7 +165,11 @@ export function WaterQualityFormScreen() {
       try {
         if (isOnline) {
           try {
-            await api.post('/v1/water-quality/readings', payload);
+            // CreateWaterQualityDto lives at POST /v1/water-quality — no
+            // /readings suffix, and it expects doMgL/salinity/source, not
+            // the local form's field names.
+            const apiPayload = buildWaterQualityApiPayload(payload, generateUUID());
+            await api.post('/v1/water-quality', apiPayload);
             Alert.alert('Sucesso', 'Coleta registrada e sincronizada!', [
               { text: 'OK', onPress: () => navigation.goBack() },
             ]);

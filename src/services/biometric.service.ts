@@ -1,13 +1,5 @@
-import { getDb } from '../database/db';
-
-function generateUUID(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
-  bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant
-  const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
+import { outboxRepository } from '../database/repositories/outbox.repository';
+import { generateUUID } from '../utils/uuid';
 
 export interface BiometricOfflinePayload {
   cycleId: string;
@@ -19,22 +11,37 @@ export interface BiometricOfflinePayload {
   responsibleName: string;
 }
 
+/** How far into the future a measurement can be timestamped before we ask the
+ * operator to confirm — guards against a phone with the wrong clock, not a
+ * hard rejection, since a few minutes of drift is normal. */
+export const MEASURED_AT_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
+
+export function isMeasuredAtTooFarInFuture(measuredAt: Date, now: Date = new Date()): boolean {
+  return measuredAt.getTime() > now.getTime() + MEASURED_AT_FUTURE_TOLERANCE_MS;
+}
+
 export async function saveOfflineBiometric(payload: BiometricOfflinePayload): Promise<string> {
-  const db = await getDb();
   const clientId = generateUUID();
 
-  await db.runAsync(
-    `INSERT OR REPLACE INTO outbox (client_id, entity, payload, status, attempts, measured_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
-    [
-      clientId,
-      'biometrics',
-      JSON.stringify(payload),
-      'pending',
-      0,
-      payload.measuredAt,
-    ],
-  );
+  // Mirrors CreateBiometricDto in aquafort-api (POST /v1/biometrics). The API
+  // rejects unknown fields (forbidNonWhitelisted), so responsibleName stays
+  // out of the body — it's only for the local screen; the outbox list
+  // resolves the name from responsibleId via the local users cache.
+  const body = {
+    cycleId: payload.cycleId,
+    measuredAt: payload.measuredAt,
+    sampleCount: payload.sampleCount,
+    averageWeightG: payload.averageWeightG,
+    survivalRatePct: payload.survivalRatePct,
+    responsibleId: payload.responsibleId,
+  };
+
+  await outboxRepository.enqueue({
+    clientId,
+    entity: 'biometrics',
+    payload: body,
+    measuredAt: payload.measuredAt,
+  });
 
   return clientId;
 }

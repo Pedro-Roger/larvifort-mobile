@@ -1,6 +1,7 @@
 import NetInfo from '@react-native-community/netinfo';
 import { api } from './api';
 import { getDb } from '../database/db';
+import { outboxRepository } from '../database/repositories/outbox.repository';
 import type { Pond, Cycle, User, OutboxItem, FeedProduct } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -58,46 +59,24 @@ export async function pullData(): Promise<void> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function pushOutbox(): Promise<{ sent: number; failed: number }> {
-  const db = await getDb();
-
-  const rows = await db.getAllAsync<{
-    client_id: string;
-    entity: string;
-    payload: string;
-    attempts: number;
-  }>(
-    `SELECT client_id, entity, payload, attempts FROM outbox
-     WHERE status = 'pending'
-     ORDER BY created_at ASC
-     LIMIT 50`,
-  );
+  const items = await outboxRepository.findPendingBatch(50);
 
   let sent = 0;
   let failed = 0;
 
-  for (const row of rows) {
+  for (const item of items) {
     try {
-      const payload = JSON.parse(row.payload);
-      await api.post(`/v1/${row.entity}`, payload);
+      await api.post(`/v1/${item.entity}`, item.payload);
 
-      await db.runAsync(
-        `UPDATE outbox SET status = 'synced' WHERE client_id = ?`,
-        [row.client_id],
-      );
+      await outboxRepository.markSynced(item.clientId);
       sent++;
     } catch (err: any) {
       const errorMsg = err?.message ?? 'Unknown error';
-      await db.runAsync(
-        `UPDATE outbox SET attempts = attempts + 1, last_error = ? WHERE client_id = ?`,
-        [errorMsg, row.client_id],
-      );
+      await outboxRepository.incrementAttempts(item.clientId, errorMsg);
 
       // Mark as error after 3 attempts
-      if (row.attempts + 1 >= 3) {
-        await db.runAsync(
-          `UPDATE outbox SET status = 'error' WHERE client_id = ?`,
-          [row.client_id],
-        );
+      if (item.attempts + 1 >= 3) {
+        await outboxRepository.markError(item.clientId);
       }
       failed++;
     }
@@ -111,10 +90,7 @@ export async function pushOutbox(): Promise<{ sent: number; failed: number }> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function retryErrors(): Promise<void> {
-  const db = await getDb();
-  await db.runAsync(
-    `UPDATE outbox SET status = 'pending', attempts = 0, last_error = NULL WHERE status = 'error'`,
-  );
+  await outboxRepository.retryAllErrors();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

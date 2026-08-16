@@ -1,23 +1,20 @@
 import { saveOfflineBiometric } from '../biometric.service';
 
-// Mock the db module
-jest.mock('../../database/db', () => ({
-  getDb: jest.fn(),
+jest.mock('../../database/repositories/outbox.repository', () => ({
+  outboxRepository: {
+    enqueue: jest.fn().mockResolvedValue(undefined),
+  },
 }));
 
-import { getDb } from '../../database/db';
+import { outboxRepository } from '../../database/repositories/outbox.repository';
 
 describe('biometric.service', () => {
-  const mockDb = {
-    runAsync: jest.fn().mockResolvedValue(undefined),
-  };
-
   beforeEach(() => {
     jest.clearAllMocks();
-    (getDb as jest.Mock).mockResolvedValue(mockDb);
+    (outboxRepository.enqueue as jest.Mock).mockResolvedValue(undefined);
   });
 
-  it('should insert a biometric record into the outbox', async () => {
+  it('should insert a biometric record into the outbox under the biometrics entity', async () => {
     await saveOfflineBiometric({
       cycleId: 'cycle-1',
       measuredAt: '2026-06-18T10:00:00.000Z',
@@ -28,20 +25,13 @@ describe('biometric.service', () => {
       responsibleName: 'João Silva',
     });
 
-    expect(mockDb.runAsync).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT OR REPLACE INTO outbox'),
-      expect.arrayContaining(['biometrics']),
+    expect(outboxRepository.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ entity: 'biometrics' }),
     );
   });
 
   it('should generate a client_id UUID', async () => {
-    const calls: any[] = [];
-    mockDb.runAsync.mockImplementation((sql: string, params: any[]) => {
-      calls.push({ sql, params });
-      return Promise.resolve();
-    });
-
-    await saveOfflineBiometric({
+    const clientId = await saveOfflineBiometric({
       cycleId: 'cycle-1',
       measuredAt: '2026-06-18T10:00:00.000Z',
       sampleCount: 20,
@@ -50,18 +40,13 @@ describe('biometric.service', () => {
       responsibleName: 'João Silva',
     });
 
-    const clientId = calls[0].params[0];
     // UUID v4 pattern
     expect(clientId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    const [params] = (outboxRepository.enqueue as jest.Mock).mock.calls[0];
+    expect(params.clientId).toBe(clientId);
   });
 
-  it('should store responsible_id and responsible_name in payload', async () => {
-    const calls: any[] = [];
-    mockDb.runAsync.mockImplementation((sql: string, params: any[]) => {
-      calls.push({ sql, params });
-      return Promise.resolve();
-    });
-
+  it('should store responsible_id in payload but keep responsible_name out of it (RF-12 / API contract)', async () => {
     await saveOfflineBiometric({
       cycleId: 'cycle-1',
       measuredAt: '2026-06-18T10:00:00.000Z',
@@ -71,20 +56,15 @@ describe('biometric.service', () => {
       responsibleName: 'Maria Costa',
     });
 
-    const payloadStr = calls[0].params.find((p: any) => typeof p === 'string' && p.includes('responsible'));
-    expect(payloadStr).toBeDefined();
-    const payload = JSON.parse(payloadStr);
-    expect(payload.responsibleId).toBe('user-42');
-    expect(payload.responsibleName).toBe('Maria Costa');
+    const [params] = (outboxRepository.enqueue as jest.Mock).mock.calls[0];
+    expect(params.payload.responsibleId).toBe('user-42');
+    // CreateBiometricDto on the API doesn't whitelist responsibleName — the
+    // request pipeline (forbidNonWhitelisted) would reject the whole POST if
+    // it were sent. The name is only for the local form/screen.
+    expect(params.payload).not.toHaveProperty('responsibleName');
   });
 
-  it('should set status to pending', async () => {
-    const calls: any[] = [];
-    mockDb.runAsync.mockImplementation((sql: string, params: any[]) => {
-      calls.push({ sql, params });
-      return Promise.resolve();
-    });
-
+  it('should queue with the measuredAt as the measured_at value', async () => {
     await saveOfflineBiometric({
       cycleId: 'cycle-1',
       measuredAt: '2026-06-18T10:00:00.000Z',
@@ -94,6 +74,7 @@ describe('biometric.service', () => {
       responsibleName: 'Test',
     });
 
-    expect(calls[0].params).toContain('pending');
+    const [params] = (outboxRepository.enqueue as jest.Mock).mock.calls[0];
+    expect(params.measuredAt).toBe('2026-06-18T10:00:00.000Z');
   });
 });

@@ -66,6 +66,10 @@ export function HomeScreen() {
     navigation.navigate('FeedingForm', undefined);
   }, [navigation]);
 
+  const navigateToMortalityForm = useCallback(() => {
+    navigation.navigate('MortalityForm', undefined);
+  }, [navigation]);
+
   const navigateToOutbox = useCallback(() => {
     navigation.navigate('Outbox');
   }, [navigation]);
@@ -137,6 +141,9 @@ export function HomeScreen() {
       )}
 
       {/* Feeding sits closest to the thumb: it is what the field records most. */}
+      <TouchableOpacity style={[styles.fab, styles.fabMortality]} onPress={navigateToMortalityForm}>
+        <Text style={styles.fabIcon}>💀</Text>
+      </TouchableOpacity>
       <TouchableOpacity style={[styles.fab, styles.fabWater]} onPress={navigateToForm}>
         <Text style={styles.fabIcon}>💧</Text>
       </TouchableOpacity>
@@ -287,6 +294,11 @@ const styles = StyleSheet.create({
     bottom: 104,
     backgroundColor: '#0f766e',
     shadowColor: '#0f766e',
+  },
+  fabMortality: {
+    bottom: 248,
+    backgroundColor: '#b91c1c',
+    shadowColor: '#b91c1c',
   },
   fabWater: {
     bottom: 176,

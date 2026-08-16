@@ -11,6 +11,9 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { useForm, useWatch, Controller } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { PondSelector } from '../../components/PondSelector';
@@ -27,6 +30,25 @@ type Nav = NativeStackNavigationProp<AppStackParamList, 'FeedingForm'>;
 /** Common tray amounts, so the operator taps instead of typing in the sun. */
 const QUICK_KG = [10, 20, 30, 50];
 
+const formSchema = z.object({
+  feedKg: z
+    .string()
+    .transform((v) => parseFloat((v ?? '').replace(',', '.')))
+    .pipe(
+      z
+        .number({ error: 'Informe uma quantidade maior que zero.' })
+        .positive('Informe uma quantidade maior que zero.'),
+    ),
+  observation: z.string().optional(),
+});
+
+/**
+ * The schema takes what the input holds (text) and gives back a number, so the
+ * form field and the submit handler are typed from opposite ends of it.
+ */
+type FormInput = z.input<typeof formSchema>;
+type FormData = z.output<typeof formSchema>;
+
 export function FeedingFormScreen() {
   const navigation = useNavigation<Nav>();
   const { user } = useAuth();
@@ -36,10 +58,24 @@ export function FeedingFormScreen() {
   const [selectedPond, setSelectedPond] = useState<Pond | null>(null);
   const [selectedCycle, setSelectedCycle] = useState<Cycle | null>(null);
   const [product, setProduct] = useState<FeedProduct | null>(null);
-  const [feedKg, setFeedKg] = useState('');
-  const [observation, setObservation] = useState('');
   const [pendingKg, setPendingKg] = useState(0);
   const [saving, setSaving] = useState(false);
+
+  const {
+    control,
+    handleSubmit,
+    setValue,
+    reset,
+    formState: { errors },
+  } = useForm<FormInput, unknown, FormData>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      feedKg: '',
+      observation: '',
+    },
+  });
+
+  const feedKgRaw = useWatch({ control, name: 'feedKg' });
 
   // Default to the only product, which is the usual case on a farm.
   useEffect(() => {
@@ -57,50 +93,44 @@ export function FeedingFormScreen() {
       .catch(() => setPendingKg(0));
   }, [selectedPond]);
 
-  const parsedKg = Number(feedKg.replace(',', '.'));
+  const onSubmit = useCallback(
+    async (data: FormData) => {
+      if (!selectedPond) return Alert.alert('Erro', 'Selecione o viveiro.');
+      if (!selectedCycle) return Alert.alert('Erro', 'Selecione o ciclo.');
+      if (!product) return Alert.alert('Erro', 'Nenhum produto de ração disponível. Sincronize primeiro.');
+      if (!user) return Alert.alert('Erro', 'Sessão sem usuário.');
 
-  const doSave = useCallback(async () => {
-    if (!selectedCycle || !selectedPond || !product || !user) return;
+      setSaving(true);
+      try {
+        await saveOfflineFeeding({
+          cycleId: selectedCycle.id,
+          pondId: selectedPond.id,
+          productId: product.id,
+          feedKg: data.feedKg,
+          fedAt: new Date().toISOString(),
+          responsibleId: user.id,
+          responsibleName: user.name,
+          observation: data.observation?.trim() || undefined,
+        });
 
-    setSaving(true);
-    try {
-      await saveOfflineFeeding({
-        cycleId: selectedCycle.id,
-        pondId: selectedPond.id,
-        productId: product.id,
-        feedKg: parsedKg,
-        fedAt: new Date().toISOString(),
-        responsibleId: user.id,
-        responsibleName: user.name,
-        observation: observation.trim() || undefined,
-      });
+        syncNow().catch(() => {});
+        Alert.alert('Salvo', `${data.feedKg} kg registrados em ${selectedPond.code}.`, [
+          { text: 'Lançar outro', onPress: () => reset({ feedKg: '', observation: '' }) },
+          { text: 'Concluir', onPress: () => navigation.goBack() },
+        ]);
+      } catch (error: any) {
+        Alert.alert('Erro', error?.message ?? 'Falha ao salvar o trato.');
+      } finally {
+        setSaving(false);
+      }
+    },
+    [selectedCycle, selectedPond, product, user, syncNow, navigation, reset],
+  );
 
-      syncNow().catch(() => {});
-      Alert.alert('Salvo', `${parsedKg} kg registrados em ${selectedPond.code}.`, [
-        { text: 'Lançar outro', onPress: () => { setFeedKg(''); setObservation(''); } },
-        { text: 'Concluir', onPress: () => navigation.goBack() },
-      ]);
-    } catch (error: any) {
-      Alert.alert('Erro', error?.message ?? 'Falha ao salvar o trato.');
-    } finally {
-      setSaving(false);
-    }
-  }, [selectedCycle, selectedPond, product, user, parsedKg, observation, syncNow, navigation]);
-
-  const handleSubmit = useCallback(() => {
-    if (!selectedPond) return Alert.alert('Erro', 'Selecione o viveiro.');
-    if (!selectedCycle) return Alert.alert('Erro', 'Selecione o ciclo.');
-    if (!product) return Alert.alert('Erro', 'Nenhum produto de ração disponível. Sincronize primeiro.');
-    if (!user) return Alert.alert('Erro', 'Sessão sem usuário.');
-    if (!Number.isFinite(parsedKg) || parsedKg <= 0) {
-      return Alert.alert('Erro', 'Informe uma quantidade maior que zero.');
-    }
-    doSave();
-  }, [selectedPond, selectedCycle, product, user, parsedKg, doSave]);
-
+  const parsedKgPreview = parseFloat((feedKgRaw ?? '').replace(',', '.'));
   const estimatedCost =
-    product?.priceKg != null && Number.isFinite(parsedKg) && parsedKg > 0
-      ? product.priceKg * parsedKg
+    product?.priceKg != null && Number.isFinite(parsedKgPreview) && parsedKgPreview > 0
+      ? product.priceKg * parsedKgPreview
       : null;
 
   return (
@@ -135,31 +165,38 @@ export function FeedingFormScreen() {
             <TouchableOpacity
               key={amount}
               style={styles.quickBtn}
-              onPress={() => setFeedKg(String(amount))}
+              onPress={() => setValue('feedKg', String(amount), { shouldValidate: true })}
             >
               <Text style={styles.quickText}>{amount} kg</Text>
             </TouchableOpacity>
           ))}
         </View>
 
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>
-            Ração (kg) <Text style={styles.required}>*</Text>
-          </Text>
-          <TextInput
-            style={styles.inputLarge}
-            keyboardType="decimal-pad"
-            value={feedKg}
-            onChangeText={setFeedKg}
-            placeholder="0"
-            placeholderTextColor="#64748b"
-          />
-          {estimatedCost != null && (
-            <Text style={styles.hint}>
-              Custo estimado: {estimatedCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-            </Text>
+        <Controller
+          control={control}
+          name="feedKg"
+          render={({ field }) => (
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>
+                Ração (kg) <Text style={styles.required}>*</Text>
+              </Text>
+              <TextInput
+                style={[styles.inputLarge, errors.feedKg && styles.inputError]}
+                keyboardType="decimal-pad"
+                value={field.value}
+                onChangeText={field.onChange}
+                placeholder="0"
+                placeholderTextColor="#64748b"
+              />
+              {errors.feedKg && <Text style={styles.errorText}>{errors.feedKg.message}</Text>}
+              {estimatedCost != null && (
+                <Text style={styles.hint}>
+                  Custo estimado: {estimatedCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                </Text>
+              )}
+            </View>
           )}
-        </View>
+        />
 
         <Text style={styles.sectionTitle}>Produto</Text>
         <View style={styles.productRow}>
@@ -180,20 +217,26 @@ export function FeedingFormScreen() {
           )}
         </View>
 
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Observação</Text>
-          <TextInput
-            style={styles.input}
-            value={observation}
-            onChangeText={setObservation}
-            placeholder="Ex.: coroa, cocheira, aumento após bandeja"
-            placeholderTextColor="#64748b"
-          />
-        </View>
+        <Controller
+          control={control}
+          name="observation"
+          render={({ field }) => (
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Observação</Text>
+              <TextInput
+                style={styles.input}
+                value={field.value}
+                onChangeText={field.onChange}
+                placeholder="Ex.: coroa, cocheira, aumento após bandeja"
+                placeholderTextColor="#64748b"
+              />
+            </View>
+          )}
+        />
 
         <TouchableOpacity
           style={[styles.submitBtn, saving && styles.submitBtnDisabled]}
-          onPress={handleSubmit}
+          onPress={handleSubmit(onSubmit)}
           disabled={saving}
         >
           {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitText}>Registrar trato</Text>}
@@ -236,6 +279,14 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     borderWidth: 1,
     borderColor: '#334155',
+  },
+  inputError: {
+    borderColor: '#ef4444',
+  },
+  errorText: {
+    color: '#ef4444',
+    fontSize: 12,
+    marginTop: 6,
   },
   hint: { color: '#94a3b8', fontSize: 12, marginTop: 8 },
   quickRow: { flexDirection: 'row', gap: 8, marginBottom: 14, flexWrap: 'wrap' },
