@@ -1,5 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
-import { api } from './api';
+import { api, clearActiveFarmId } from './api';
 import type { AuthUser } from '../types';
 
 const ACCESS_TOKEN_KEY = 'aquafort_token';
@@ -29,6 +29,24 @@ export async function logout(): Promise<void> {
   await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
   await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
   await SecureStore.deleteItemAsync(USER_KEY);
+  // Sem isso, o próximo login neste aparelho herdaria a fazenda ativa do
+  // usuário anterior até /me/farms resolver (RN-02 cobre esse fallback, mas
+  // não há motivo pra depender dele aqui).
+  await clearActiveFarmId();
+}
+
+/**
+ * Multi-fazenda: POST /v1/auth/switch-farm rotaciona o par de tokens (o novo
+ * JWT carrega as mesmas farms/role de sempre, só re-assinado) — mesmo
+ * comportamento do aquafort-web (`setAuth()` em FarmProvider.switchFarm).
+ * Exportado para farm.service.ts chamar depois de uma troca de fazenda bem
+ * sucedida, sem duplicar as chaves do SecureStore aqui.
+ */
+export async function updateTokens(accessToken: string, refreshToken?: string): Promise<void> {
+  await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, accessToken);
+  if (refreshToken) {
+    await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refreshToken);
+  }
 }
 
 export async function getAccessToken(): Promise<string | null> {

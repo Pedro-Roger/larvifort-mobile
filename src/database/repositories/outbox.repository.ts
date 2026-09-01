@@ -15,6 +15,14 @@ export interface EnqueueParams {
   entity: string;
   payload: Record<string, unknown>;
   measuredAt: string;
+  /**
+   * Multi-fazenda: fazenda ativa no momento da CRIAÇÃO do registro offline —
+   * não é lida de novo no momento do sync, porque a fazenda ativa pode ter
+   * mudado no intervalo (outro técnico usa o aparelho, ou o mesmo técnico
+   * troca de fazenda no meio do dia). Ver src/services/sync.service.ts, onde
+   * esse valor vira o header X-Farm-Id enviado ao backend.
+   */
+  farmId: string;
 }
 
 interface OutboxRow {
@@ -26,6 +34,7 @@ interface OutboxRow {
   measured_at: string;
   created_at: string;
   last_error: string | null;
+  farm_id: string | null;
 }
 
 function deserialize(row: OutboxRow): OutboxItem {
@@ -38,6 +47,7 @@ function deserialize(row: OutboxRow): OutboxItem {
     measuredAt: row.measured_at,
     createdAt: row.created_at,
     lastError: row.last_error ?? undefined,
+    farmId: row.farm_id ?? undefined,
   };
 }
 
@@ -47,12 +57,12 @@ export const outboxRepository = {
    * API dedupes on, so re-enqueueing the same id replaces the pending row
    * instead of creating a duplicate.
    */
-  async enqueue({ clientId, entity, payload, measuredAt }: EnqueueParams): Promise<void> {
+  async enqueue({ clientId, entity, payload, measuredAt, farmId }: EnqueueParams): Promise<void> {
     const db = await getDb();
     await db.runAsync(
-      `INSERT OR REPLACE INTO outbox (client_id, entity, payload, status, attempts, measured_at, created_at)
-       VALUES (?, ?, ?, 'pending', 0, ?, datetime('now'))`,
-      [clientId, entity, JSON.stringify(payload), measuredAt],
+      `INSERT OR REPLACE INTO outbox (client_id, entity, payload, status, attempts, measured_at, created_at, farm_id)
+       VALUES (?, ?, ?, 'pending', 0, ?, datetime('now'), ?)`,
+      [clientId, entity, JSON.stringify(payload), measuredAt, farmId],
     );
   },
 

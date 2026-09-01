@@ -1,5 +1,6 @@
 import { outboxRepository } from '../database/repositories/outbox.repository';
 import { generateUUID } from '../utils/uuid';
+import { getActiveFarmId } from './api';
 import type { WaterQualityRecord } from '../types';
 
 /**
@@ -47,11 +48,19 @@ export async function saveOffline(
   const clientId = generateUUID();
   const payload = buildWaterQualityApiPayload(data, clientId);
 
+  // Multi-fazenda: captura a fazenda ativa AGORA, no momento da criação —
+  // ver EnqueueParams.farmId e biometric.service.ts.
+  const farmId = await getActiveFarmId();
+  if (!farmId) {
+    throw new Error('Nenhuma fazenda ativa. Aguarde a sincronização de fazendas antes de registrar.');
+  }
+
   await outboxRepository.enqueue({
     clientId,
     entity: 'water-quality',
     payload: { ...payload },
     measuredAt: data.measuredAt,
+    farmId,
   });
 
   return clientId;

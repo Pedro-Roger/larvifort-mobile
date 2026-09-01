@@ -5,13 +5,51 @@ jest.mock('../../database/repositories/outbox.repository', () => ({
     enqueue: jest.fn().mockResolvedValue(undefined),
   },
 }));
+jest.mock('../api', () => ({
+  getActiveFarmId: jest.fn(),
+}));
 
 import { outboxRepository } from '../../database/repositories/outbox.repository';
+import { getActiveFarmId } from '../api';
 
 describe('biometric.service', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (outboxRepository.enqueue as jest.Mock).mockResolvedValue(undefined);
+    (getActiveFarmId as jest.Mock).mockResolvedValue('farm-1');
+  });
+
+  // Multi-fazenda: farmId é capturado NA CRIAÇÃO, não relido no sync — ver
+  // sync.service.spec.ts para o cenário completo de fazenda ativa mudando
+  // antes do sync.
+  it('captures the active farm at creation time and stores it on the outbox item', async () => {
+    await saveOfflineBiometric({
+      cycleId: 'cycle-1',
+      measuredAt: '2026-06-18T10:00:00.000Z',
+      sampleCount: 30,
+      averageWeightG: 5.5,
+      responsibleId: 'user-1',
+      responsibleName: 'João Silva',
+    });
+
+    const [params] = (outboxRepository.enqueue as jest.Mock).mock.calls[0];
+    expect(params.farmId).toBe('farm-1');
+  });
+
+  it('refuses to queue a record when there is no active farm resolved yet', async () => {
+    (getActiveFarmId as jest.Mock).mockResolvedValue(null);
+
+    await expect(
+      saveOfflineBiometric({
+        cycleId: 'cycle-1',
+        measuredAt: '2026-06-18T10:00:00.000Z',
+        sampleCount: 30,
+        averageWeightG: 5.5,
+        responsibleId: 'user-1',
+        responsibleName: 'João Silva',
+      }),
+    ).rejects.toThrow('Nenhuma fazenda ativa');
+    expect(outboxRepository.enqueue).not.toHaveBeenCalled();
   });
 
   it('should insert a biometric record into the outbox under the biometrics entity', async () => {

@@ -11,9 +11,20 @@ export const CREATE_OUTBOX = `
     attempts    INTEGER NOT NULL DEFAULT 0,
     measured_at TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    last_error  TEXT
+    last_error  TEXT,
+    farm_id     TEXT
   );
 `;
+
+/**
+ * Multi-fazenda (Entrega 4): coluna adicionada depois que a tabela `outbox`
+ * já existia em produção. `CREATE TABLE IF NOT EXISTS` acima não altera
+ * tabelas já criadas em instalações antigas, então essa migration roda
+ * separadamente em db.ts (ensureOutboxFarmIdColumn), guardada por
+ * `PRAGMA table_info` pra ser idempotente — SQLite não tem
+ * `ADD COLUMN IF NOT EXISTS`.
+ */
+export const ADD_OUTBOX_FARM_ID_COLUMN = `ALTER TABLE outbox ADD COLUMN farm_id TEXT;`;
 
 export const CREATE_PONDS_CACHE = `
   CREATE TABLE IF NOT EXISTS ponds_cache (

@@ -5,8 +5,12 @@ jest.mock('../../database/repositories/outbox.repository', () => ({
     enqueue: jest.fn().mockResolvedValue(undefined),
   },
 }));
+jest.mock('../api', () => ({
+  getActiveFarmId: jest.fn(),
+}));
 
 import { outboxRepository } from '../../database/repositories/outbox.repository';
+import { getActiveFarmId } from '../api';
 
 describe('mortality.service', () => {
   const payload = {
@@ -21,6 +25,21 @@ describe('mortality.service', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (outboxRepository.enqueue as jest.Mock).mockResolvedValue(undefined);
+    (getActiveFarmId as jest.Mock).mockResolvedValue('farm-1');
+  });
+
+  it('captures the active farm at creation time and stores it on the outbox item', async () => {
+    await saveOfflineMortality(payload);
+
+    const [params] = (outboxRepository.enqueue as jest.Mock).mock.calls[0];
+    expect(params.farmId).toBe('farm-1');
+  });
+
+  it('refuses to queue a record when there is no active farm resolved yet', async () => {
+    (getActiveFarmId as jest.Mock).mockResolvedValue(null);
+
+    await expect(saveOfflineMortality(payload)).rejects.toThrow('Nenhuma fazenda ativa');
+    expect(outboxRepository.enqueue).not.toHaveBeenCalled();
   });
 
   it('queues the mortality record under the entity the API route expects', async () => {

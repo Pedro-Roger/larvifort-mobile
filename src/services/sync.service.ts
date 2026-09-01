@@ -1,5 +1,5 @@
 import NetInfo from '@react-native-community/netinfo';
-import { api } from './api';
+import { api, getActiveFarmId } from './api';
 import { getDb } from '../database/db';
 import { outboxRepository } from '../database/repositories/outbox.repository';
 import type { Pond, Cycle, User, OutboxItem, FeedProduct } from '../types';
@@ -66,7 +66,28 @@ export async function pushOutbox(): Promise<{ sent: number; failed: number }> {
 
   for (const item of items) {
     try {
-      await api.post(`/v1/${item.entity}`, item.payload);
+      // Multi-fazenda: envia o farmId CAPTURADO na criação do registro
+      // (item.farmId), não a fazenda ativa agora — entre o lançamento em
+      // campo e o sync (pode levar horas/dias sem sinal) a fazenda ativa
+      // pode ter mudado. Só cai pro fallback "fazenda ativa agora" em
+      // registros legados enfileirados antes desta coluna existir, e nesse
+      // caso avisa: pode estar sincronizando pra fazenda errada.
+      let farmId = item.farmId;
+      if (!farmId) {
+        farmId = (await getActiveFarmId()) ?? undefined;
+        if (farmId) {
+          console.warn(
+            `[sync] outbox item ${item.clientId} (${item.entity}) não tem farmId capturado (registro legado) — ` +
+              `usando a fazenda ativa agora (${farmId}) como fallback. Pode sincronizar pra fazenda errada.`,
+          );
+        }
+      }
+
+      if (farmId) {
+        await api.post(`/v1/${item.entity}`, item.payload, { headers: { 'X-Farm-Id': farmId } });
+      } else {
+        await api.post(`/v1/${item.entity}`, item.payload);
+      }
 
       await outboxRepository.markSynced(item.clientId);
       sent++;

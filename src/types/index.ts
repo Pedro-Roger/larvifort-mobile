@@ -94,6 +94,14 @@ export interface OutboxItem {
   measuredAt: string;
   createdAt: string;
   lastError?: string;
+  /**
+   * Multi-fazenda: fazenda ativa no momento em que o registro foi CRIADO
+   * offline, não a fazenda ativa no momento do sync (que pode ter mudado
+   * entre a captura em campo e a sincronização). `undefined` só ocorre em
+   * registros legados enfileirados antes desta coluna existir — ver
+   * sync.service.ts para o fallback aplicado a esses casos.
+   */
+  farmId?: string;
 }
 
 export interface AuthUser {
@@ -101,6 +109,31 @@ export interface AuthUser {
   name: string;
   email: string;
   role: UserRole;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Multi-fazenda (Entrega 4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type FarmMembershipStatus = 'ACTIVE' | 'INACTIVE';
+
+/** Espelha o response de GET /v1/me/farms. */
+export interface Farm {
+  farmId: string;
+  farmName: string;
+  role: UserRole;
+  status: FarmMembershipStatus;
+}
+
+/** Espelha o response de POST /v1/auth/switch-farm. */
+export interface SwitchFarmResult {
+  accessToken: string;
+  refreshToken?: string;
+  tokenType?: string;
+  expiresIn?: number;
+  farmId: string;
+  role: UserRole;
+  farmStatus: FarmMembershipStatus;
 }
 
 export interface FeedProduct {

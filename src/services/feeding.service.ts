@@ -1,5 +1,6 @@
 import { outboxRepository } from '../database/repositories/outbox.repository';
 import { generateUUID } from '../utils/uuid';
+import { getActiveFarmId } from './api';
 
 /**
  * Feeding is what the field records most, and it is the number that moves
@@ -29,6 +30,13 @@ export async function saveOfflineFeeding(payload: FeedingOfflinePayload): Promis
 
   const clientId = generateUUID();
 
+  // Multi-fazenda: captura a fazenda ativa AGORA, no momento da criação —
+  // ver EnqueueParams.farmId e biometric.service.ts.
+  const farmId = await getActiveFarmId();
+  if (!farmId) {
+    throw new Error('Nenhuma fazenda ativa. Aguarde a sincronização de fazendas antes de registrar.');
+  }
+
   // clientUuid makes the push idempotent: if the sync retries after a timeout,
   // the API returns the record it already has instead of feeding twice.
   const body = {
@@ -47,6 +55,7 @@ export async function saveOfflineFeeding(payload: FeedingOfflinePayload): Promis
     entity: FEEDING_ENTITY,
     payload: body,
     measuredAt: payload.fedAt,
+    farmId,
   });
 
   return clientId;

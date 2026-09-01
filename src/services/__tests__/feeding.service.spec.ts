@@ -6,8 +6,12 @@ jest.mock('../../database/repositories/outbox.repository', () => ({
     findPendingByEntity: jest.fn().mockResolvedValue([]),
   },
 }));
+jest.mock('../api', () => ({
+  getActiveFarmId: jest.fn(),
+}));
 
 import { outboxRepository } from '../../database/repositories/outbox.repository';
+import { getActiveFarmId } from '../api';
 
 describe('feeding.service', () => {
   const payload = {
@@ -24,6 +28,21 @@ describe('feeding.service', () => {
     jest.clearAllMocks();
     (outboxRepository.enqueue as jest.Mock).mockResolvedValue(undefined);
     (outboxRepository.findPendingByEntity as jest.Mock).mockResolvedValue([]);
+    (getActiveFarmId as jest.Mock).mockResolvedValue('farm-1');
+  });
+
+  it('captures the active farm at creation time and stores it on the outbox item', async () => {
+    await saveOfflineFeeding(payload);
+
+    const [params] = (outboxRepository.enqueue as jest.Mock).mock.calls[0];
+    expect(params.farmId).toBe('farm-1');
+  });
+
+  it('refuses to queue a record when there is no active farm resolved yet', async () => {
+    (getActiveFarmId as jest.Mock).mockResolvedValue(null);
+
+    await expect(saveOfflineFeeding(payload)).rejects.toThrow('Nenhuma fazenda ativa');
+    expect(outboxRepository.enqueue).not.toHaveBeenCalled();
   });
 
   it('queues the feeding under the express route the API exposes', async () => {

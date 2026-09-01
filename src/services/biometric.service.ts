@@ -1,5 +1,6 @@
 import { outboxRepository } from '../database/repositories/outbox.repository';
 import { generateUUID } from '../utils/uuid';
+import { getActiveFarmId } from './api';
 
 export interface BiometricOfflinePayload {
   cycleId: string;
@@ -23,6 +24,14 @@ export function isMeasuredAtTooFarInFuture(measuredAt: Date, now: Date = new Dat
 export async function saveOfflineBiometric(payload: BiometricOfflinePayload): Promise<string> {
   const clientId = generateUUID();
 
+  // Multi-fazenda: captura a fazenda ativa AGORA, no momento da criação —
+  // não pode ser lida de novo no sync.service, porque a fazenda ativa pode
+  // mudar antes do registro sincronizar. Ver EnqueueParams.farmId.
+  const farmId = await getActiveFarmId();
+  if (!farmId) {
+    throw new Error('Nenhuma fazenda ativa. Aguarde a sincronização de fazendas antes de registrar.');
+  }
+
   // Mirrors CreateBiometricDto in aquafort-api (POST /v1/biometrics). The API
   // rejects unknown fields (forbidNonWhitelisted), so responsibleName stays
   // out of the body — it's only for the local screen; the outbox list
@@ -41,6 +50,7 @@ export async function saveOfflineBiometric(payload: BiometricOfflinePayload): Pr
     entity: 'biometrics',
     payload: body,
     measuredAt: payload.measuredAt,
+    farmId,
   });
 
   return clientId;

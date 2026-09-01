@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { outboxRepository } from '../database/repositories/outbox.repository';
 import { generateUUID } from '../utils/uuid';
+import { getActiveFarmId } from './api';
 
 /**
  * Mortality feeds the survival math the whole cycle depends on (current
@@ -48,6 +49,13 @@ export async function saveOfflineMortality(payload: MortalityOfflinePayload): Pr
 
   const clientId = generateUUID();
 
+  // Multi-fazenda: captura a fazenda ativa AGORA, no momento da criação —
+  // ver EnqueueParams.farmId e biometric.service.ts.
+  const farmId = await getActiveFarmId();
+  if (!farmId) {
+    throw new Error('Nenhuma fazenda ativa. Aguarde a sincronização de fazendas antes de registrar.');
+  }
+
   // clientUuid makes the push idempotent: if the sync retries after a timeout,
   // the API returns the record it already has instead of counting the deaths twice.
   const body = {
@@ -66,6 +74,7 @@ export async function saveOfflineMortality(payload: MortalityOfflinePayload): Pr
     entity: MORTALITY_ENTITY,
     payload: body,
     measuredAt: data.recordedAt,
+    farmId,
   });
 
   return clientId;

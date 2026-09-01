@@ -1,5 +1,6 @@
 jest.mock('../api', () => ({
   api: { post: jest.fn(), get: jest.fn() },
+  getActiveFarmId: jest.fn(),
 }));
 jest.mock('../../database/db', () => ({
   getDb: jest.fn(),
@@ -9,7 +10,7 @@ jest.mock('@react-native-community/netinfo', () => ({
 }));
 
 import { pushOutbox } from '../sync.service';
-import { api } from '../api';
+import { api, getActiveFarmId } from '../api';
 import { getDb } from '../../database/db';
 
 const mockDb = {
@@ -23,6 +24,7 @@ describe('pushOutbox', () => {
     jest.clearAllMocks();
     (getDb as jest.Mock).mockResolvedValue(mockDb);
     (api.post as jest.Mock).mockResolvedValue({ data: { id: 'server-id' } });
+    (getActiveFarmId as jest.Mock).mockResolvedValue(null);
   });
 
   it('should POST biometric to /v1/biometrics (not /v1/biometric)', async () => {
@@ -110,5 +112,58 @@ describe('pushOutbox', () => {
 
     expect(result.sent).toBe(1);
     expect(result.failed).toBe(1);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Multi-fazenda (Entrega 4) — achado crítico: um registro criado offline
+  // precisa sincronizar com o farmId capturado NO MOMENTO DA CRIAÇÃO, não
+  // com a fazenda ativa no momento do sync (que pode ter mudado no
+  // intervalo). Ver src/services/sync.service.ts e
+  // src/database/repositories/outbox.repository.ts (EnqueueParams.farmId).
+  // ───────────────────────────────────────────────────────────────────────
+
+  it('syncs an item with the farmId captured at creation time (farm A), even if the active farm changed to B before sync', async () => {
+    // Fazenda ativa MUDOU pra B entre a criação do registro e o sync.
+    (getActiveFarmId as jest.Mock).mockResolvedValue('farm-B');
+
+    mockDb.getAllAsync.mockResolvedValue([
+      {
+        client_id: 'uuid-offline-1',
+        entity: 'biometrics',
+        payload: JSON.stringify({ cycleId: 'c1' }),
+        attempts: 0,
+        farm_id: 'farm-A', // capturado na criação, quando a fazenda ativa era A
+      },
+    ]);
+
+    await pushOutbox();
+
+    expect(api.post).toHaveBeenCalledWith(
+      '/v1/biometrics',
+      expect.objectContaining({ cycleId: 'c1' }),
+      { headers: { 'X-Farm-Id': 'farm-A' } },
+    );
+  });
+
+  it('falls back to the currently active farm only for legacy items enqueued before farm_id existed', async () => {
+    (getActiveFarmId as jest.Mock).mockResolvedValue('farm-current');
+
+    mockDb.getAllAsync.mockResolvedValue([
+      {
+        client_id: 'uuid-legacy',
+        entity: 'biometrics',
+        payload: JSON.stringify({ cycleId: 'c1' }),
+        attempts: 0,
+        farm_id: null,
+      },
+    ]);
+
+    await pushOutbox();
+
+    expect(api.post).toHaveBeenCalledWith(
+      '/v1/biometrics',
+      expect.objectContaining({ cycleId: 'c1' }),
+      { headers: { 'X-Farm-Id': 'farm-current' } },
+    );
   });
 });
